@@ -26,16 +26,9 @@ required before a member can withdraw savings or apply for a loan.
 
 # Getting started from a brand-new machine
 
-Pick whichever path matches how you want to work. If you're not sure, **Path
-1 (browser download, no Git)** is the simplest for someone who just wants to
-run the program once.
+- **Path Pycharm** — Either OS, using PyCharm
 
-- **Path 1** — Windows, no Git, just a browser
-- **Path 2** — Windows, using Git + terminal
-- **Path 3** — Mac, using Git + terminal
-- **Path 4** — Either OS, using PyCharm
-
-All paths end the same way: a project folder containing `sacco.py`, with a
+The path ends the same way: a project folder containing `sacco.py`, with a
 Python virtual environment and dependencies installed, ready to run.
 
 ---
