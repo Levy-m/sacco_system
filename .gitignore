@@ -1,0 +1,5 @@
+env/
+__pycache__/
+*.pyc
+biometric_data
+sacco_data.json
