@@ -37,8 +37,7 @@ Python virtual environment and dependencies installed, ready to run.
 
 PyCharm can handle Git, the virtual environment, and dependency install for
 you through its interface — you still need Git installed on your system
-first (see Path 2 step 1 for Windows, or Path 3 step 1 for Mac); PyCharm
-just calls it from the background.
+first, PyCharm just calls it from the background.
 
 ### 1. Clone the repo
 
