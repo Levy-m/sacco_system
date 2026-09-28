@@ -10,10 +10,14 @@
 # Run this file to start the system.
 
 import contextlib
+import hashlib
+import hmac
 import io
+import os
 from datetime import date
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk, messagebox
 
 from storage import load_data, save_data
@@ -41,26 +45,36 @@ AMBER = "#b26a00"
 RED = "#c62828"
 TEAL = "#00796b"
 
-# Words that get coloured wherever they appear in a table
-STATUS_COLORS = {
-    "Deposit": GREEN,
-    "Withdrawal": RED,
-    "Loan Repayment": BLUE,
-    "Pending": AMBER,
-    "Approved": BLUE,
-    "Repaid": GREEN,
-    "Rejected": RED,
-    "Enrolled": GREEN,
-    "Not set": AMBER,
+# Loan statuses that deserve attention get a soft row highlight in tables.
+# Everything else stays plain dark text on white/striped rows.
+STATUS_TAGS = {
+    "Pending": {"background": "#fff4e0"},
+    "Repaid": {"background": "#e8f5e9"},
+    "Rejected": {"foreground": MUTED},
 }
 
 ALL_MEMBERS = "All members"
 
+# Screens with display scaling (for example 4K laptops) draw text larger,
+# so sizes given in pixels are multiplied by this. Set in setup_styles().
+UI_SCALE = 1.0
+
+
+def px(size):
+    """Scale a pixel size to suit the current display."""
+    return int(size * UI_SCALE)
+
 
 def setup_styles(root):
     """Give every ttk widget a consistent, clean look on Windows, Mac and Linux."""
+    global UI_SCALE
     style = ttk.Style(root)
     style.theme_use("clam")
+
+    # A 10pt font is about 18px tall on a normal screen; anything taller
+    # means the display is scaled, so grow row heights and widths to match.
+    line_height = tkfont.Font(root=root, font=("Segoe UI", 10)).metrics("linespace")
+    UI_SCALE = max(1.0, line_height / 18)
 
     style.configure(".", background=PAGE_BG, foreground=TEXT, font=("Segoe UI", 10))
     style.configure("TFrame", background=PAGE_BG)
@@ -71,21 +85,21 @@ def setup_styles(root):
     style.configure("Money.TLabel", font=("Segoe UI", 12, "bold"), foreground=TEAL, background=PAGE_BG)
 
     # Buttons: green for "go" actions, blue for biometric/secondary actions, red for destructive ones
-    style.configure("TButton", padding=(10, 5))
+    style.configure("TButton", padding=(px(10), px(4)))
     for name, colour, pressed in (("Accent", GREEN, "#256628"),
                                   ("Primary", BLUE, "#0f4f96"),
                                   ("Danger", RED, "#a31f1f")):
         style.configure(name + ".TButton", foreground="white", background=colour, bordercolor=colour)
         style.map(name + ".TButton", background=[("active", pressed), ("pressed", pressed)])
 
-    style.configure("Treeview", rowheight=26, background=CARD_BG, fieldbackground=CARD_BG, foreground=TEXT)
+    style.configure("Treeview", rowheight=line_height + px(8), background=CARD_BG, fieldbackground=CARD_BG, foreground=TEXT)
     style.map("Treeview", background=[("selected", "#cfe3f1")], foreground=[("selected", TEXT)])
     style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"),
                     background=SIDEBAR_BG, foreground="white", relief="flat")
     style.map("Treeview.Heading", background=[("active", SIDEBAR_ACTIVE)])
 
     style.configure("TNotebook", background=PAGE_BG)
-    style.configure("TNotebook.Tab", padding=(14, 6))
+    style.configure("TNotebook.Tab", padding=(px(14), px(4)))
     style.map("TNotebook.Tab", background=[("selected", CARD_BG)],
               foreground=[("selected", SIDEBAR_BG)])
     style.configure("TLabelframe", background=PAGE_BG)
@@ -109,12 +123,15 @@ def make_table(parent, columns):
 
     for column_id, (heading, width, anchor) in zip(ids, columns):
         tree.heading(column_id, text=heading, anchor=anchor)
-        tree.column(column_id, width=width, anchor=anchor, stretch=True)
+        # Only the wide text columns (names, emails) take up spare space;
+        # short columns like IDs, dates and amounts keep their size.
+        tree.column(column_id, width=px(width), minwidth=px(60), anchor=anchor,
+                    stretch=width >= 180)
 
-    # Striped rows, plus a text colour for each status word
+    # Striped rows, plus a soft highlight for loan statuses that need attention
     tree.tag_configure("stripe", background=STRIPE_BG)
-    for word, colour in STATUS_COLORS.items():
-        tree.tag_configure(word, foreground=colour)
+    for word, options in STATUS_TAGS.items():
+        tree.tag_configure(word, **options)
 
     scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scroll.set)
@@ -131,7 +148,7 @@ def fill_table(tree, rows):
         if index % 2 == 1:
             tags.append("stripe")
         for value in row:
-            if value in STATUS_COLORS:
+            if value in STATUS_TAGS:
                 tags.append(value)
                 break
         tree.insert("", "end", values=row, tags=tags)
@@ -279,43 +296,141 @@ def capture_output(function, *args):
 
 
 # ==========================================================
+# SECTION 3B: USER ACCOUNTS (LOGIN)
+# Staff accounts are kept in the same data file under "users".
+# Passwords are never stored: only a salted PBKDF2 hash of them.
+# ==========================================================
+
+PASSWORD_ITERATIONS = 200_000
+MIN_PASSWORD_LENGTH = 6
+MAX_LOGIN_ATTEMPTS = 5
+
+
+def hash_password(password, salt=None):
+    """Return (salt, hash) as hex text. A new random salt is made if none is given."""
+    if salt is None:
+        salt = os.urandom(16).hex()
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                 bytes.fromhex(salt), PASSWORD_ITERATIONS)
+    return salt, digest.hex()
+
+
+def make_user(username, password, role):
+    salt, password_hash = hash_password(password)
+    return {"username": username, "salt": salt, "password_hash": password_hash,
+            "role": role, "date_created": today()}
+
+
+def find_user(data, username):
+    for user in data.get("users", []):
+        if user["username"].lower() == username.lower():
+            return user
+    return None
+
+
+def check_login(data, username, password):
+    """Return the user if the username and password are correct, otherwise None."""
+    user = find_user(data, username)
+    if user is None:
+        # Still do the slow hash so a wrong username takes as long as a wrong password
+        hash_password(password)
+        return None
+    salt, password_hash = hash_password(password, user["salt"])
+    if hmac.compare_digest(password_hash, user["password_hash"]):
+        return user
+    return None
+
+
+def password_problem(password, confirm_password):
+    """Return a message describing what is wrong with a new password, or None if it is fine."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return "The password must be at least " + str(MIN_PASSWORD_LENGTH) + " characters long."
+    if password != confirm_password:
+        return "The two passwords do not match."
+    return None
+
+
+# ==========================================================
 # SECTION 4: THE MAIN WINDOW
 # ==========================================================
 
 class SaccoApp(tk.Tk):
-    """The main window: a navigation sidebar on the left, pages on the right."""
+    """
+    The main window. It first shows the login screen; once a staff member
+    signs in it shows a navigation sidebar on the left and pages on the right.
+    """
 
     def __init__(self):
         super().__init__()
         self.title("SACCO Financial Management System")
-        self.geometry("1180x720")
-        self.minsize(980, 620)
         self.configure(background=PAGE_BG)
         setup_styles(self)
+
+        # Open at about 70% of the screen, centred, whatever the resolution
+        width = min(int(self.winfo_screenwidth() * 0.7), px(1400))
+        height = min(int(self.winfo_screenheight() * 0.75), px(860))
+        x = (self.winfo_screenwidth() - width) // 2
+        y = (self.winfo_screenheight() - height) // 3
+        self.geometry(str(width) + "x" + str(height) + "+" + str(x) + "+" + str(y))
+        self.minsize(px(980), px(620))
 
         self.data, problem = capture_output(load_data)
         if problem:
             messagebox.showwarning("Data file", problem)
+        self.data.setdefault("users", [])
 
+        self.user = None
+        self.pages = {}
+        self.nav_buttons = {}
+        self.show_login()
+
+    # ---------- login and logout ----------
+
+    def clear_window(self):
+        for child in self.winfo_children():
+            child.destroy()
+        self.pages = {}
+        self.nav_buttons = {}
+
+    def show_login(self):
+        """Show the sign-in screen (or the first-time setup screen if there are no accounts)."""
+        self.clear_window()
+        self.user = None
+        LoginScreen(self).pack(fill="both", expand=True)
+
+    def login(self, user):
+        """Called by the login screen once the username and password are correct."""
+        self.user = user
+        self.clear_window()
+        self.build_main_window()
+
+    def logout(self):
+        if messagebox.askyesno("Log out", "Log out of the SACCO system?"):
+            self.show_login()
+
+    def is_admin(self):
+        return self.user is not None and self.user["role"] == "Administrator"
+
+    # ---------- main window ----------
+
+    def build_main_window(self):
         # --- Sidebar ---
-        sidebar = tk.Frame(self, background=SIDEBAR_BG, width=220)
+        sidebar = tk.Frame(self, background=SIDEBAR_BG, width=px(210))
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
         tk.Label(sidebar, text="SACCO", background=SIDEBAR_BG, foreground=SIDEBAR_FG,
-                 font=("Segoe UI", 20, "bold")).pack(pady=(24, 0))
+                 font=("Segoe UI", 18, "bold")).pack(pady=(px(22), 0))
         tk.Label(sidebar, text="Financial Management", background=SIDEBAR_BG,
-                 foreground="#b7c7d3", font=("Segoe UI", 10)).pack()
-        tk.Frame(sidebar, background=SIDEBAR_HIGHLIGHT, height=2, width=60).pack(pady=(10, 24))
+                 foreground="#b7c7d3", font=("Segoe UI", 9)).pack()
+        tk.Frame(sidebar, background=SIDEBAR_HIGHLIGHT, height=2, width=px(48)).pack(pady=(px(10), px(18)))
 
         # --- Page area ---
-        content = ttk.Frame(self, padding=20)
+        content = ttk.Frame(self, padding=(px(24), px(18)))
         content.pack(side="left", fill="both", expand=True)
         content.rowconfigure(0, weight=1)
         content.columnconfigure(0, weight=1)
 
-        self.pages = {}
-        self.nav_buttons = {}
         navigation = [
             ("Dashboard", DashboardPage),
             ("Members", MembersPage),
@@ -324,6 +439,8 @@ class SaccoApp(tk.Tk):
             ("Transactions", TransactionsPage),
             ("Reports", ReportsPage),
         ]
+        if self.is_admin():
+            navigation.append(("Users", UsersPage))
 
         for name, page_class in navigation:
             page = page_class(content, self)
@@ -333,24 +450,47 @@ class SaccoApp(tk.Tk):
             # Each menu item is a thin colour strip (shown when active) plus a flat button
             row = tk.Frame(sidebar, background=SIDEBAR_BG)
             row.pack(fill="x")
-            strip = tk.Frame(row, background=SIDEBAR_BG, width=4)
+            strip = tk.Frame(row, background=SIDEBAR_BG, width=px(4))
             strip.pack(side="left", fill="y")
-            button = tk.Button(row, text="  " + name, anchor="w", relief="flat",
+            button = tk.Button(row, text=name, anchor="w", relief="flat",
                                background=SIDEBAR_BG, foreground=SIDEBAR_FG,
                                activebackground=SIDEBAR_ACTIVE, activeforeground=SIDEBAR_FG,
-                               font=("Segoe UI", 11), borderwidth=0, highlightthickness=0,
-                               padx=16, pady=10, cursor="hand2",
+                               font=("Segoe UI", 10), borderwidth=0, highlightthickness=0,
+                               padx=px(18), pady=px(7), cursor="hand2",
                                command=lambda n=name: self.show_page(n))
             button.pack(side="left", fill="x", expand=True)
             self.nav_buttons[name] = (button, strip)
 
-        tk.Button(sidebar, text="   Exit", anchor="w", relief="flat",
-                  background=SIDEBAR_BG, foreground="#ffb4b4",
-                  activebackground=SIDEBAR_ACTIVE, activeforeground="#ffb4b4",
-                  font=("Segoe UI", 11), borderwidth=0, padx=16, pady=10,
-                  cursor="hand2", command=self.destroy).pack(side="bottom", fill="x", pady=16)
+        # --- Signed-in user and log out, pinned to the bottom ---
+        footer = tk.Frame(sidebar, background=SIDEBAR_BG)
+        footer.pack(side="bottom", fill="x", pady=(0, px(14)))
+        tk.Frame(footer, background=SIDEBAR_ACTIVE, height=1).pack(fill="x", padx=px(18), pady=(0, px(10)))
+        tk.Label(footer, text=self.user["username"], background=SIDEBAR_BG, foreground=SIDEBAR_FG,
+                 font=("Segoe UI", 10, "bold"), anchor="w").pack(fill="x", padx=px(22))
+        tk.Label(footer, text=self.user["role"], background=SIDEBAR_BG, foreground="#b7c7d3",
+                 font=("Segoe UI", 9), anchor="w").pack(fill="x", padx=px(22), pady=(0, px(6)))
+        for text, command in (("Change Password", self.change_password),
+                              ("Log Out", self.logout)):
+            tk.Button(footer, text=text, anchor="w", relief="flat",
+                      background=SIDEBAR_BG, foreground="#b7c7d3",
+                      activebackground=SIDEBAR_ACTIVE, activeforeground=SIDEBAR_FG,
+                      font=("Segoe UI", 9), borderwidth=0, highlightthickness=0,
+                      padx=px(22), pady=px(3), cursor="hand2", command=command).pack(fill="x")
 
         self.show_page("Dashboard")
+
+    def change_password(self):
+        dialog = PasswordDialog(self, "Change Password", ask_current=True)
+        self.wait_window(dialog)
+        if dialog.result is None:
+            return
+        current, new_password = dialog.result
+        if check_login(self.data, self.user["username"], current) is None:
+            messagebox.showerror("Change password", "Your current password is incorrect.")
+            return
+        self.user["salt"], self.user["password_hash"] = hash_password(new_password)
+        self.save()
+        messagebox.showinfo("Change password", "Your password has been changed.")
 
     def show_page(self, name):
         """Bring a page to the front and refresh it with the latest data."""
@@ -1302,7 +1442,250 @@ class ReportsPage(Page):
 
 
 # ==========================================================
-# SECTION 11: PROGRAM START
+# SECTION 11: LOGIN SCREEN AND USER ACCOUNTS
+# ==========================================================
+
+class LoginScreen(tk.Frame):
+    """
+    The first thing shown when the program starts. If no staff accounts
+    exist yet, it asks for the first administrator account instead.
+    """
+
+    def __init__(self, app):
+        super().__init__(app, background=SIDEBAR_BG)
+        self.app = app
+        self.failed_attempts = 0
+        self.first_run = len(app.data["users"]) == 0
+
+        # A white card in the middle of a navy background
+        card = tk.Frame(self, background=CARD_BG, padx=px(36), pady=px(30))
+        card.place(relx=0.5, rely=0.45, anchor="center")
+        tk.Frame(card, background=SIDEBAR_HIGHLIGHT, height=px(4)).pack(fill="x", pady=(0, px(18)))
+
+        tk.Label(card, text="SACCO Financial Management", background=CARD_BG, foreground=SIDEBAR_BG,
+                 font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        if self.first_run:
+            subtitle = "First-time setup: create the administrator account"
+        else:
+            subtitle = "Sign in to continue"
+        tk.Label(card, text=subtitle, background=CARD_BG, foreground=MUTED,
+                 font=("Segoe UI", 10)).pack(anchor="w", pady=(px(2), px(18)))
+
+        self.username = self.add_field(card, "Username")
+        self.password = self.add_field(card, "Password", secret=True)
+        self.confirm = self.add_field(card, "Confirm password", secret=True) if self.first_run else None
+
+        self.message = tk.Label(card, text="", background=CARD_BG, foreground=RED,
+                                font=("Segoe UI", 9), anchor="w", justify="left",
+                                wraplength=px(300))
+        self.message.pack(fill="x", pady=(px(4), px(8)))
+
+        self.button = ttk.Button(card, text="Create Account" if self.first_run else "Sign In",
+                                 style="Accent.TButton", command=self.submit)
+        self.button.pack(fill="x")
+
+        app.bind("<Return>", lambda event: self.submit())
+        self.username.focus_set()
+
+    def add_field(self, parent, label, secret=False):
+        tk.Label(parent, text=label, background=CARD_BG, foreground=TEXT,
+                 font=("Segoe UI", 10)).pack(anchor="w")
+        entry = ttk.Entry(parent, width=34, show="•" if secret else "")
+        entry.pack(fill="x", pady=(px(2), px(10)), ipady=px(3))
+        return entry
+
+    def submit(self):
+        if str(self.button["state"]) == "disabled":
+            return
+        username = self.username.get().strip()
+        password = self.password.get()
+
+        if username == "":
+            self.message.configure(text="Please enter a username.")
+            return
+
+        if self.first_run:
+            problem = password_problem(password, self.confirm.get())
+            if problem:
+                self.message.configure(text=problem)
+                return
+            user = make_user(username, password, "Administrator")
+            self.app.data["users"].append(user)
+            capture_output(save_data, self.app.data)
+            self.finish(user)
+            return
+
+        user = check_login(self.app.data, username, password)
+        if user is not None:
+            self.finish(user)
+            return
+
+        self.failed_attempts += 1
+        self.password.delete(0, "end")
+        if self.failed_attempts >= MAX_LOGIN_ATTEMPTS:
+            # Slow down password guessing: lock the form for 30 seconds
+            self.failed_attempts = 0
+            self.button.state(["disabled"])
+            self.message.configure(text="Too many failed attempts. Please wait 30 seconds.")
+            self.after(30000, self.unlock)
+        else:
+            self.message.configure(text="Incorrect username or password.")
+
+    def unlock(self):
+        if self.winfo_exists():
+            self.button.state(["!disabled"])
+            self.message.configure(text="")
+
+    def finish(self, user):
+        self.app.unbind("<Return>")
+        self.app.login(user)
+
+
+class PasswordDialog(tk.Toplevel):
+    """
+    Pop-up for passwords. It can also ask for a username and role
+    (when adding a user) or the current password (when changing your own).
+    result is (first value, new password) or None if cancelled.
+    """
+
+    def __init__(self, app, title, ask_current=False, ask_user=False):
+        super().__init__(app)
+        self.result = None
+        self.ask_current = ask_current
+        self.ask_user = ask_user
+        self.title(title)
+        self.configure(background=PAGE_BG)
+        self.resizable(False, False)
+        self.transient(app)
+
+        body = ttk.Frame(self, padding=px(20))
+        body.pack(fill="both", expand=True)
+
+        self.fields = {}
+        rows = []
+        if ask_user:
+            rows.append(("username", "Username:"))
+        if ask_current:
+            rows.append(("current", "Current password:"))
+        rows.extend([("new", "New password:" if not ask_user else "Password:"),
+                     ("confirm", "Confirm password:")])
+
+        for row, (key, label) in enumerate(rows):
+            ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=px(4))
+            entry = ttk.Entry(body, width=30, show="" if key == "username" else "•")
+            entry.grid(row=row, column=1, pady=px(4), padx=(px(10), 0))
+            self.fields[key] = entry
+
+        if ask_user:
+            ttk.Label(body, text="Role:").grid(row=len(rows), column=0, sticky="w", pady=px(4))
+            self.role = ttk.Combobox(body, state="readonly", width=28,
+                                     values=["Staff", "Administrator"])
+            self.role.set("Staff")
+            self.role.grid(row=len(rows), column=1, pady=px(4), padx=(px(10), 0))
+
+        buttons = ttk.Frame(body)
+        buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="e", pady=(px(14), 0))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="Save", style="Accent.TButton",
+                   command=self.on_save).pack(side="right", padx=(0, px(8)))
+
+        self.bind("<Return>", lambda event: self.on_save())
+        self.bind("<Escape>", lambda event: self.destroy())
+        list(self.fields.values())[0].focus_set()
+        self.wait_visibility()
+        self.grab_set()
+
+    def on_save(self):
+        if self.ask_user and self.fields["username"].get().strip() == "":
+            messagebox.showerror("Missing username", "Please enter a username.", parent=self)
+            return
+        problem = password_problem(self.fields["new"].get(), self.fields["confirm"].get())
+        if problem:
+            messagebox.showerror("Password", problem, parent=self)
+            return
+
+        if self.ask_user:
+            first = (self.fields["username"].get().strip(), self.role.get())
+        elif self.ask_current:
+            first = self.fields["current"].get()
+        else:
+            first = None
+        self.result = (first, self.fields["new"].get())
+        self.destroy()
+
+
+class UsersPage(Page):
+    """Administrators only: manage the staff accounts that can sign in."""
+
+    def __init__(self, parent, app):
+        super().__init__(parent, app, "Users", "Staff accounts that can sign in to the system")
+
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill="x", pady=(0, px(10)))
+        ttk.Button(toolbar, text="Add User", style="Accent.TButton", command=self.add).pack(side="left")
+        ttk.Button(toolbar, text="Reset Password", command=self.reset).pack(side="left", padx=(px(8), 0))
+        ttk.Button(toolbar, text="Delete", style="Danger.TButton", command=self.delete).pack(side="right")
+
+        frame, self.table = make_table(self, [
+            ("Username", 220, "w"), ("Role", 140, "w"), ("Created", 120, "w")])
+        frame.pack(fill="both", expand=True)
+
+    def refresh(self):
+        rows = []
+        for user in self.data["users"]:
+            rows.append((user["username"], user["role"], user.get("date_created", "")))
+        fill_table(self.table, rows)
+
+    def selected_user(self):
+        username = selected_value(self.table)
+        if username is None:
+            messagebox.showinfo("No user selected", "Please select a user in the table first.")
+            return None
+        return find_user(self.data, username)
+
+    def add(self):
+        dialog = PasswordDialog(self.app, "Add User", ask_user=True)
+        self.app.wait_window(dialog)
+        if dialog.result is None:
+            return
+        (username, role), password = dialog.result
+        if find_user(self.data, username) is not None:
+            messagebox.showerror("Add user", "A user called '" + username + "' already exists.")
+            return
+        self.data["users"].append(make_user(username, password, role))
+        self.app.save()
+        messagebox.showinfo("Add user", "User '" + username + "' created as " + role + ".")
+
+    def reset(self):
+        user = self.selected_user()
+        if user is None:
+            return
+        dialog = PasswordDialog(self.app, "Reset Password - " + user["username"])
+        self.app.wait_window(dialog)
+        if dialog.result is None:
+            return
+        user["salt"], user["password_hash"] = hash_password(dialog.result[1])
+        self.app.save()
+        messagebox.showinfo("Reset password", "Password for '" + user["username"] + "' has been reset.")
+
+    def delete(self):
+        user = self.selected_user()
+        if user is None:
+            return
+        if user is self.app.user:
+            messagebox.showerror("Delete user", "You cannot delete the account you are signed in with.")
+            return
+        admins = [u for u in self.data["users"] if u["role"] == "Administrator"]
+        if user["role"] == "Administrator" and len(admins) <= 1:
+            messagebox.showerror("Delete user", "The last administrator account cannot be deleted.")
+            return
+        if messagebox.askyesno("Delete user", "Delete the account '" + user["username"] + "'?", icon="warning"):
+            self.data["users"].remove(user)
+            self.app.save()
+
+
+# ==========================================================
+# SECTION 12: PROGRAM START
 # ==========================================================
 
 def main():

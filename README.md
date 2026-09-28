@@ -6,8 +6,9 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-5f6b76)
 
 A desktop application for managing SACCO members, savings, loans,
-repayments and transactions. Sensitive actions (withdrawing savings and
-applying for a loan) are protected by face-based biometric verification.
+repayments and transactions. Staff sign in with a username and password,
+and sensitive actions (withdrawing savings and applying for a loan) are
+protected by face-based biometric verification.
 
 Everything runs in a graphical window: there is no terminal menu to use.
 
@@ -17,16 +18,17 @@ Everything runs in a graphical window: there is no terminal menu to use.
 
 | Area | What you can do |
 |---|---|
+| **Sign in** | Password-protected staff accounts, with a lockout after repeated failed attempts |
 | **Dashboard** | See member count, total savings, loans outstanding, pending applications and recent transactions at a glance |
 | **Members** | Register, search, edit and delete members; enroll a member's face; open a full member statement |
 | **Savings** | Deposit savings, and withdraw savings after biometric verification |
 | **Loans** | Apply for a loan (biometric required), approve or reject applications, record repayments and view loan balances |
 | **Transactions** | Browse every transaction, filtered by member and type, with running totals |
 | **Reports** | Member list, total savings, loans issued, outstanding loans, repayments, transactions and individual statements |
+| **Users** *(administrators only)* | Add staff accounts, reset passwords and remove accounts |
 
-Tables are colour-coded by status: deposits and repaid loans in green,
-withdrawals and rejected loans in red, pending items in amber, and approved
-loans and repayments in blue.
+In loan tables, pending applications are highlighted in amber and fully
+repaid loans in green, so items needing attention stand out.
 
 ---
 
@@ -42,7 +44,8 @@ loans and repayments in blue.
 
 Data files are created automatically on first use and are not committed to Git:
 
-- `sacco_data.json` holds members, transactions and loans
+- `sacco_data.json` holds members, transactions, loans and staff accounts
+  (passwords are stored only as salted hashes, never as plain text)
 - `biometric_data/` holds the enrolled face samples and trained model
 
 ---
@@ -96,9 +99,29 @@ PyCharm uses it in the background.
 - Or open `sacco_gui.py` and click the green ▶ button next to
   `if __name__ == "__main__":`
 
-The SACCO window opens on the **Dashboard**. Use the sidebar on the left to
-move between pages. From then on, the green ▶ button at the top right of
-PyCharm starts the application again.
+The first time it runs, the application asks you to **create the
+administrator account** (username and a password of at least 6 characters).
+After that, it opens on the sign-in screen every time.
+
+Once signed in, the application opens on the **Dashboard**. Use the sidebar
+on the left to move between pages. From then on, the green ▶ button at the
+top right of PyCharm starts the application again.
+
+---
+
+## Signing in and user accounts
+
+- **First run:** the account you create is an **Administrator**.
+- **Adding staff:** administrators open the **Users** page and click
+  **Add User**. Choose the **Staff** role for day-to-day users. Staff can
+  use every page except Users.
+- **Forgotten password:** an administrator selects the user on the
+  **Users** page and clicks **Reset Password**.
+- **Your own password:** click **Change Password** at the bottom of the
+  sidebar.
+- **Security:** after 5 wrong passwords in a row the sign-in form locks for
+  30 seconds. You cannot delete your own account or the last administrator.
+- **Log out:** click **Log Out** at the bottom of the sidebar.
 
 ---
 
