@@ -166,6 +166,13 @@ their **Member ID** (for example `SM001`) and either:
 - **a face scan:** enter the Member ID, then click **Sign In with Face Scan**.
   This works once the member's face has been enrolled.
 
+Members registered before portal passwords existed can sign in by face.
+After a face sign-in, a member without a password is asked to **create
+their portal password**. They can choose **Later**, and are asked again at
+their next face sign-in until one is set. Members with neither a password
+nor a face scan need a teller to set a password (Members → **Edit**) or
+enroll their face.
+
 In the portal, members see **My Account** (balances, transactions and
 a full statement) and **My Loans** (their loans, plus applying for a new one
 with a face scan). Applications go to a loan officer for approval.

@@ -500,6 +500,29 @@ class SaccoApp(tk.Tk):
         self.member = member
         self.clear_window()
         self.build_main_window()
+        # Members who only have a face scan are asked to create a password,
+        # once the portal is on screen (they can choose "Later")
+        if not member_has_password(member):
+            self.after(200, self.prompt_member_password)
+
+    def prompt_member_password(self):
+        """Ask a member without a portal password to create one."""
+        if self.member is None or member_has_password(self.member):
+            return
+        dialog = PasswordDialog(
+            self, "Create Your Portal Password",
+            note="You signed in with a face scan, but you don't have a portal password yet.\n"
+                 "Create one so you can also sign in with your Member ID and password.",
+            cancel_text="Later")
+        self.wait_window(dialog)
+        if dialog.result is None:
+            return
+        set_member_password(self.member, dialog.result[1])
+        self.save()
+        messagebox.showinfo("Portal password",
+                            "Your portal password has been created. You can now sign in with "
+                            "Member ID " + self.member["member_id"] + " and your password, "
+                            "or with a face scan.")
 
     def logout(self):
         if messagebox.askyesno("Log out", "Log out of the SACCO system?"):
@@ -1962,7 +1985,7 @@ class PasswordDialog(tk.Toplevel):
     result is (first value, new password) or None if cancelled.
     """
 
-    def __init__(self, app, title, ask_current=False, ask_user=False):
+    def __init__(self, app, title, ask_current=False, ask_user=False, note=None, cancel_text="Cancel"):
         super().__init__(app)
         self.result = None
         self.ask_current = ask_current
@@ -1975,6 +1998,12 @@ class PasswordDialog(tk.Toplevel):
         body = ttk.Frame(self, padding=px(20))
         body.pack(fill="both", expand=True)
 
+        first_row = 0
+        if note:
+            ttk.Label(body, text=note, style="Sub.TLabel", justify="left").grid(
+                row=0, column=0, columnspan=2, sticky="w", pady=(0, px(10)))
+            first_row = 1
+
         self.fields = {}
         rows = []
         if ask_user:
@@ -1984,22 +2013,22 @@ class PasswordDialog(tk.Toplevel):
         rows.extend([("new", "New password:" if not ask_user else "Password:"),
                      ("confirm", "Confirm password:")])
 
-        for row, (key, label) in enumerate(rows):
+        for row, (key, label) in enumerate(rows, start=first_row):
             ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=px(4))
             entry = ttk.Entry(body, width=30, show="" if key == "username" else "•")
             entry.grid(row=row, column=1, pady=px(4), padx=(px(10), 0))
             self.fields[key] = entry
 
         if ask_user:
-            ttk.Label(body, text="Role:").grid(row=len(rows), column=0, sticky="w", pady=px(4))
+            ttk.Label(body, text="Role:").grid(row=first_row + len(rows), column=0, sticky="w", pady=px(4))
             self.role = ttk.Combobox(body, state="readonly", width=28,
                                      values=STAFF_ROLES)
             self.role.set(TELLER)
-            self.role.grid(row=len(rows), column=1, pady=px(4), padx=(px(10), 0))
+            self.role.grid(row=first_row + len(rows), column=1, pady=px(4), padx=(px(10), 0))
 
         buttons = ttk.Frame(body)
-        buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="e", pady=(px(14), 0))
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        buttons.grid(row=first_row + len(rows) + 1, column=0, columnspan=2, sticky="e", pady=(px(14), 0))
+        ttk.Button(buttons, text=cancel_text, command=self.destroy).pack(side="right")
         ttk.Button(buttons, text="Save", style="Accent.TButton",
                    command=self.on_save).pack(side="right", padx=(0, px(8)))
 
