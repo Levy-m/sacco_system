@@ -1,106 +1,142 @@
 # SACCO Financial Management System
 
-A desktop (GUI) Python application for managing SACCO members, savings,
-loans, repayments, and transactions — with face-based biometric verification
-required before a member can withdraw savings or apply for a loan.
+![Python](https://img.shields.io/badge/Python-3.10%2B-1f3b4d?logo=python&logoColor=white)
+![GUI](https://img.shields.io/badge/GUI-Tkinter-2e7d32)
+![Biometrics](https://img.shields.io/badge/Biometrics-OpenCV-1565c0?logo=opencv&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-5f6b76)
 
-The GUI is built with Tkinter, which ships with Python. The original
-menu-driven console version (`sacco.py`) still works and shares the same
-data file.
+A desktop application for managing SACCO members, savings, loans,
+repayments and transactions. Sensitive actions (withdrawing savings and
+applying for a loan) are protected by face-based biometric verification.
+
+Everything runs in a graphical window: there is no terminal menu to use.
+
+---
 
 ## Features
 
-- Register, search, update, and delete members
-- Deposit and withdraw savings (withdrawals require biometric verification)
-- Apply for, approve/reject, and repay loans (applications require biometric verification)
-- Transaction history and financial reports
-- Face enrollment and verification using OpenCV (webcam required for biometric features)
+| Area | What you can do |
+|---|---|
+| **Dashboard** | See member count, total savings, loans outstanding, pending applications and recent transactions at a glance |
+| **Members** | Register, search, edit and delete members; enroll a member's face; open a full member statement |
+| **Savings** | Deposit savings, and withdraw savings after biometric verification |
+| **Loans** | Apply for a loan (biometric required), approve or reject applications, record repayments and view loan balances |
+| **Transactions** | Browse every transaction, filtered by member and type, with running totals |
+| **Reports** | Member list, total savings, loans issued, outstanding loans, repayments, transactions and individual statements |
+
+Tables are colour-coded by status: deposits and repaid loans in green,
+withdrawals and rejected loans in red, pending items in amber, and approved
+loans and repayments in blue.
+
+---
 
 ## Project files
 
 | File | Purpose |
 |---|---|
-| `sacco_gui.py` | **GUI application — run this to start the system** |
-| `sacco.py` | Console (menu) version, and the shared calculation helpers the GUI uses |
+| `sacco_gui.py` | **The application: run this to start the system** |
 | `biometric.py` | Face enrollment and verification (OpenCV) |
-| `storage.py` | Loads/saves data to `sacco_data.json` |
-| `haarcascade_frontalface_default.xml` | Face-detection model used by OpenCV — must stay in the same folder as `biometric.py` |
+| `storage.py` | Loads and saves data to `sacco_data.json` |
+| `haarcascade_frontalface_default.xml` | Face-detection model used by OpenCV; must stay in the same folder as `biometric.py` |
 | `requirements.txt` | Python package dependencies |
 
----
+Data files are created automatically on first use and are not committed to Git:
 
-# Getting started from a brand-new machine
-
-- **Path Pycharm** — Either OS, using PyCharm
-
-The path ends the same way: a project folder containing `sacco_gui.py`, with a
-Python virtual environment and dependencies installed, ready to run.
+- `sacco_data.json` holds members, transactions and loans
+- `biometric_data/` holds the enrolled face samples and trained model
 
 ---
 
-## PyCharm (Windows or Mac)
+## Requirements
 
-PyCharm can handle Git, the virtual environment, and dependency install for
-you through its interface — you still need Git installed on your system
-first, PyCharm just calls it from the background.
+- **Python 3.10 or newer**
+- **Tkinter**, the GUI library. It is included with the python.org installers
+  for Windows and macOS. On Linux, install it separately
+  (see [Tkinter on Linux](#tkinter-on-linux)).
+- **A webcam**, for biometric enrollment and verification
+- The packages in `requirements.txt` (`opencv-contrib-python`, `numpy`)
 
-### 1. Clone the repo
+---
 
-- `File → New → Project from Version Control`
-- Paste the repo URL: `https://github.com/Levy-m/sacco_system.git`
-- Choose a location on your machine and click **Clone**
+## Setting up in PyCharm
 
-### 2. Set up the virtual environment
+PyCharm can clone the repository, create the virtual environment and install
+the dependencies for you. Git must be installed on your system first;
+PyCharm uses it in the background.
 
-- PyCharm usually detects there's no interpreter configured and offers to
-  create one — accept it, or go to
-  `File → Settings → Project: sacco_system → Python Interpreter` (on Mac:
-  `PyCharm → Settings → ...`)
-- Click **Add Interpreter → Add Local Interpreter → Virtualenv Environment**
-- Choose **New**, leave the location as the project's default `venv`
-  folder, pick your Python version, click **OK**
+### 1. Clone the repository
 
-### 3. Install dependencies
+1. `File → New → Project from Version Control`
+2. Paste the repository URL: `https://github.com/Levy-m/sacco_system.git`
+3. Choose a location on your machine and click **Clone**
 
-- Open `requirements.txt` in PyCharm — it usually shows a yellow banner
-  offering to **"Install requirements"**; click it
-- If it doesn't prompt automatically, open the **Terminal** tab at the
-  bottom of PyCharm (this runs inside the venv PyCharm just created) and run:
+### 2. Create the virtual environment
+
+1. PyCharm usually notices that no interpreter is configured and offers to
+   create one: accept it. Otherwise open
+   `File → Settings → Project: sacco_system → Python Interpreter`
+   (on macOS: `PyCharm → Settings → ...`)
+2. Click **Add Interpreter → Add Local Interpreter → Virtualenv Environment**
+3. Choose **New**, keep the default `venv` location, pick your Python
+   version and click **OK**
+
+### 3. Install the dependencies
+
+- Open `requirements.txt`. PyCharm shows a banner offering to
+  **Install requirements**: click it.
+- If no banner appears, open the **Terminal** tab at the bottom of PyCharm
+  (it runs inside the new virtual environment) and run:
   ```
   pip install -r requirements.txt
   ```
 
-### 4. Run the program
+### 4. Run the application
 
 - Right-click `sacco_gui.py` in the project sidebar → **Run 'sacco_gui'**
-- Or open `sacco_gui.py` and click the green ▶ button next to the
-  `if __name__ == "__main__":` line
+- Or open `sacco_gui.py` and click the green ▶ button next to
+  `if __name__ == "__main__":`
 
-The SACCO window opens with a sidebar: **Dashboard, Members, Savings,
-Loans, Transactions, Reports**. Withdrawals and loan applications open a
-webcam window for face verification (press `q` in that window to cancel).
-
-To run the old console version instead, run `sacco.py` the same way.
-
-### Tkinter on Linux
-
-Windows and Mac Python installers from python.org include Tkinter. On
-Linux it is a separate system package — if you see
-`ModuleNotFoundError: No module named 'tkinter'`, install it and then
-restart PyCharm:
-
-```
-sudo apt install python3-tk      # Ubuntu / Debian
-sudo dnf install python3-tkinter # Fedora
-```
+The SACCO window opens on the **Dashboard**. Use the sidebar on the left to
+move between pages. From then on, the green ▶ button at the top right of
+PyCharm starts the application again.
 
 ---
 
+## Using biometric verification
 
-## Notes
+1. On the **Members** page, select a member and click **Enroll Biometric**.
+   A camera window opens and captures 20 face samples. Move your head
+   slightly while it captures.
+2. When a member withdraws savings or applies for a loan, a camera window
+   opens to confirm their identity. The action only goes ahead if the face
+   matches.
+3. Press `q` in any camera window to cancel.
 
-- On some Linux distributions, `pip install` outside a virtual environment
-  will fail with an "externally-managed-environment" error — this is why
-  the venv step matters everywhere above; always install inside it.
-- The biometric match sensitivity can be tuned in `biometric.py` via the
-  `CONFIDENCE_THRESHOLD` constant if verification feels too strict or too loose.
+If a member has not enrolled yet, the application offers to enroll them
+before continuing. Camera or OpenCV problems are explained in a pop-up
+message.
+
+---
+
+## Troubleshooting
+
+### Tkinter on Linux
+
+If you see `ModuleNotFoundError: No module named 'tkinter'`, install the
+system package and then restart PyCharm:
+
+```
+sudo apt install python3-tk        # Ubuntu / Debian
+sudo dnf install python3-tkinter   # Fedora
+```
+
+### Other issues
+
+- **"externally-managed-environment" error on Linux:** always install
+  packages inside the project's virtual environment (step 2 above), not
+  system-wide.
+- **"missing the 'face' module":** uninstall `opencv-python` and install
+  `opencv-contrib-python` instead. Only the contrib package includes the
+  face recogniser.
+- **Verification too strict or too loose:** adjust `CONFIDENCE_THRESHOLD`
+  in `biometric.py`. Lower is stricter.

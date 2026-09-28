@@ -1,12 +1,17 @@
 # sacco_gui.py
-# SACCO Financial Management System - Graphical (GUI) version.
+# SACCO Financial Management System
+# A desktop (GUI) program that manages members, savings, loans,
+# repayments, transactions and reports.
 #
 # Built with Tkinter, which ships with Python, so the windows themselves
-# need nothing extra installed. It shares the same data file
-# (sacco_data.json), the same calculations (from sacco.py) and the same
-# face verification (biometric.py) as the menu version.
+# need nothing extra installed. Data is kept in sacco_data.json (see
+# storage.py) and face verification is handled by biometric.py.
 #
 # Run this file to start the system.
+
+import contextlib
+import io
+from datetime import date
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -14,25 +19,40 @@ from tkinter import ttk, messagebox
 from storage import load_data, save_data
 import biometric
 
-# Reuse the calculation helpers from the menu version so both
-# versions always agree on balances, IDs and formatting.
-from sacco import (today, money, next_member_id, find_member,
-                   record_transaction, savings_balance, next_loan_id,
-                   loan_balance, total_member_loan_balance)
-
 
 # ==========================================================
-# SECTION 1: COLOURS, STYLES AND SMALL HELPERS
+# SECTION 1: COLOURS AND STYLES
 # ==========================================================
 
 SIDEBAR_BG = "#1f3b4d"
 SIDEBAR_ACTIVE = "#2f5a75"
+SIDEBAR_HIGHLIGHT = "#4fb3a9"
 SIDEBAR_FG = "#ffffff"
 PAGE_BG = "#f4f6f8"
 CARD_BG = "#ffffff"
-ACCENT = "#2e7d32"
-DANGER = "#c62828"
+STRIPE_BG = "#f3f7fa"
+TEXT = "#1f2933"
 MUTED = "#5f6b76"
+
+# Accent colours: used sparingly for buttons, cards and status text
+GREEN = "#2e7d32"
+BLUE = "#1565c0"
+AMBER = "#b26a00"
+RED = "#c62828"
+TEAL = "#00796b"
+
+# Words that get coloured wherever they appear in a table
+STATUS_COLORS = {
+    "Deposit": GREEN,
+    "Withdrawal": RED,
+    "Loan Repayment": BLUE,
+    "Pending": AMBER,
+    "Approved": BLUE,
+    "Repaid": GREEN,
+    "Rejected": RED,
+    "Enrolled": GREEN,
+    "Not set": AMBER,
+}
 
 ALL_MEMBERS = "All members"
 
@@ -42,30 +62,40 @@ def setup_styles(root):
     style = ttk.Style(root)
     style.theme_use("clam")
 
-    style.configure(".", background=PAGE_BG, font=("Segoe UI", 10))
+    style.configure(".", background=PAGE_BG, foreground=TEXT, font=("Segoe UI", 10))
     style.configure("TFrame", background=PAGE_BG)
-    style.configure("Card.TFrame", background=CARD_BG, relief="solid", borderwidth=1)
-    style.configure("TLabel", background=PAGE_BG)
-    style.configure("Card.TLabel", background=CARD_BG)
-    style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"), background=PAGE_BG)
+    style.configure("TLabel", background=PAGE_BG, foreground=TEXT)
+    style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"), foreground=SIDEBAR_BG, background=PAGE_BG)
     style.configure("Sub.TLabel", foreground=MUTED, background=PAGE_BG)
-    style.configure("CardTitle.TLabel", foreground=MUTED, background=CARD_BG)
-    style.configure("CardValue.TLabel", font=("Segoe UI", 16, "bold"), background=CARD_BG)
-    style.configure("Big.TLabel", font=("Segoe UI", 12, "bold"), background=PAGE_BG)
+    style.configure("Big.TLabel", font=("Segoe UI", 12, "bold"), foreground=SIDEBAR_BG, background=PAGE_BG)
+    style.configure("Money.TLabel", font=("Segoe UI", 12, "bold"), foreground=TEAL, background=PAGE_BG)
 
+    # Buttons: green for "go" actions, blue for biometric/secondary actions, red for destructive ones
     style.configure("TButton", padding=(10, 5))
-    style.configure("Accent.TButton", foreground="white", background=ACCENT)
-    style.map("Accent.TButton", background=[("active", "#256628")])
-    style.configure("Danger.TButton", foreground="white", background=DANGER)
-    style.map("Danger.TButton", background=[("active", "#a31f1f")])
+    for name, colour, pressed in (("Accent", GREEN, "#256628"),
+                                  ("Primary", BLUE, "#0f4f96"),
+                                  ("Danger", RED, "#a31f1f")):
+        style.configure(name + ".TButton", foreground="white", background=colour, bordercolor=colour)
+        style.map(name + ".TButton", background=[("active", pressed), ("pressed", pressed)])
 
-    style.configure("Treeview", rowheight=26, background=CARD_BG, fieldbackground=CARD_BG)
-    style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+    style.configure("Treeview", rowheight=26, background=CARD_BG, fieldbackground=CARD_BG, foreground=TEXT)
+    style.map("Treeview", background=[("selected", "#cfe3f1")], foreground=[("selected", TEXT)])
+    style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"),
+                    background=SIDEBAR_BG, foreground="white", relief="flat")
+    style.map("Treeview.Heading", background=[("active", SIDEBAR_ACTIVE)])
+
     style.configure("TNotebook", background=PAGE_BG)
     style.configure("TNotebook.Tab", padding=(14, 6))
+    style.map("TNotebook.Tab", background=[("selected", CARD_BG)],
+              foreground=[("selected", SIDEBAR_BG)])
     style.configure("TLabelframe", background=PAGE_BG)
-    style.configure("TLabelframe.Label", background=PAGE_BG, font=("Segoe UI", 10, "bold"))
+    style.configure("TLabelframe.Label", background=PAGE_BG, foreground=SIDEBAR_BG,
+                    font=("Segoe UI", 10, "bold"))
 
+
+# ==========================================================
+# SECTION 2: TABLE AND INPUT HELPERS
+# ==========================================================
 
 def make_table(parent, columns):
     """
@@ -81,6 +111,11 @@ def make_table(parent, columns):
         tree.heading(column_id, text=heading, anchor=anchor)
         tree.column(column_id, width=width, anchor=anchor, stretch=True)
 
+    # Striped rows, plus a text colour for each status word
+    tree.tag_configure("stripe", background=STRIPE_BG)
+    for word, colour in STATUS_COLORS.items():
+        tree.tag_configure(word, foreground=colour)
+
     scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scroll.set)
     tree.pack(side="left", fill="both", expand=True)
@@ -91,8 +126,15 @@ def make_table(parent, columns):
 def fill_table(tree, rows):
     """Replace everything in a table with the given rows."""
     tree.delete(*tree.get_children())
-    for row in rows:
-        tree.insert("", "end", values=row)
+    for index, row in enumerate(rows):
+        tags = []
+        if index % 2 == 1:
+            tags.append("stripe")
+        for value in row:
+            if value in STATUS_COLORS:
+                tags.append(value)
+                break
+        tree.insert("", "end", values=row, tags=tags)
 
 
 def selected_value(tree):
@@ -125,9 +167,94 @@ def valid_email(email):
     return "@" in email and "." in email
 
 
+# ==========================================================
+# SECTION 3: SACCO CALCULATIONS
+# These work on the data dictionary only and never touch the screen.
+# ==========================================================
+
+def today():
+    """Return today's date as text, for example 2026-09-20."""
+    return date.today().strftime("%Y-%m-%d")
+
+
+def money(amount):
+    """Format a number as Kenyan money, for example KES 1,500.00."""
+    return "KES {:,.2f}".format(amount)
+
+
+def next_member_id(data):
+    """Work out the next member ID, for example SM001, SM002, SM003."""
+    highest = 0
+    for member in data["members"]:
+        try:
+            number = int(member["member_id"][2:])
+        except ValueError:
+            continue
+        if number > highest:
+            highest = number
+    return "SM" + str(highest + 1).zfill(3)
+
+
+def find_member(data, member_id):
+    """Look for a member using their ID. Return the member, or None."""
+    for member in data["members"]:
+        if member["member_id"].lower() == member_id.lower():
+            return member
+    return None
+
+
 def member_name(data, member_id):
     member = find_member(data, member_id)
     return member["full_name"] if member is not None else "Unknown"
+
+
+def record_transaction(data, member_id, transaction_type, amount):
+    """Save one transaction into the transactions list."""
+    data["transactions"].append({
+        "member_id": member_id,
+        "type": transaction_type,
+        "amount": amount,
+        "date": today()
+    })
+
+
+def savings_balance(data, member_id):
+    """Add up the deposits and subtract the withdrawals for one member."""
+    balance = 0
+    for transaction in data["transactions"]:
+        if transaction["member_id"] == member_id:
+            if transaction["type"] == "Deposit":
+                balance = balance + transaction["amount"]
+            elif transaction["type"] == "Withdrawal":
+                balance = balance - transaction["amount"]
+    return round(balance, 2)
+
+
+def next_loan_id(data):
+    """Work out the next loan ID, for example LN001, LN002."""
+    highest = 0
+    for loan in data["loans"]:
+        try:
+            number = int(loan["loan_id"][2:])
+        except ValueError:
+            continue
+        if number > highest:
+            highest = number
+    return "LN" + str(highest + 1).zfill(3)
+
+
+def loan_balance(loan):
+    """How much of this loan is still owed."""
+    return round(loan["amount"] - loan["amount_repaid"], 2)
+
+
+def total_member_loan_balance(data, member_id):
+    """Add up everything a member still owes on all their approved loans."""
+    total = 0
+    for loan in data["loans"]:
+        if loan["member_id"] == member_id and loan["status"] == "Approved":
+            total = total + loan_balance(loan)
+    return round(total, 2)
 
 
 def member_loans(data, member_id, status=None):
@@ -139,8 +266,20 @@ def member_loans(data, member_id, status=None):
     return loans
 
 
+def capture_output(function, *args):
+    """
+    Run a function and collect anything it prints, so storage and
+    biometric messages can be shown in a pop-up instead of a terminal.
+    Returns (result, printed_text).
+    """
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = function(*args)
+    return result, buffer.getvalue().strip()
+
+
 # ==========================================================
-# SECTION 2: THE MAIN WINDOW
+# SECTION 4: THE MAIN WINDOW
 # ==========================================================
 
 class SaccoApp(tk.Tk):
@@ -154,7 +293,9 @@ class SaccoApp(tk.Tk):
         self.configure(background=PAGE_BG)
         setup_styles(self)
 
-        self.data = load_data()
+        self.data, problem = capture_output(load_data)
+        if problem:
+            messagebox.showwarning("Data file", problem)
 
         # --- Sidebar ---
         sidebar = tk.Frame(self, background=SIDEBAR_BG, width=220)
@@ -164,7 +305,8 @@ class SaccoApp(tk.Tk):
         tk.Label(sidebar, text="SACCO", background=SIDEBAR_BG, foreground=SIDEBAR_FG,
                  font=("Segoe UI", 20, "bold")).pack(pady=(24, 0))
         tk.Label(sidebar, text="Financial Management", background=SIDEBAR_BG,
-                 foreground="#b7c7d3", font=("Segoe UI", 10)).pack(pady=(0, 24))
+                 foreground="#b7c7d3", font=("Segoe UI", 10)).pack()
+        tk.Frame(sidebar, background=SIDEBAR_HIGHLIGHT, height=2, width=60).pack(pady=(10, 24))
 
         # --- Page area ---
         content = ttk.Frame(self, padding=20)
@@ -188,13 +330,19 @@ class SaccoApp(tk.Tk):
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[name] = page
 
-            button = tk.Button(sidebar, text="   " + name, anchor="w", relief="flat",
+            # Each menu item is a thin colour strip (shown when active) plus a flat button
+            row = tk.Frame(sidebar, background=SIDEBAR_BG)
+            row.pack(fill="x")
+            strip = tk.Frame(row, background=SIDEBAR_BG, width=4)
+            strip.pack(side="left", fill="y")
+            button = tk.Button(row, text="  " + name, anchor="w", relief="flat",
                                background=SIDEBAR_BG, foreground=SIDEBAR_FG,
                                activebackground=SIDEBAR_ACTIVE, activeforeground=SIDEBAR_FG,
-                               font=("Segoe UI", 11), borderwidth=0, padx=16, pady=10,
-                               cursor="hand2", command=lambda n=name: self.show_page(n))
-            button.pack(fill="x")
-            self.nav_buttons[name] = button
+                               font=("Segoe UI", 11), borderwidth=0, highlightthickness=0,
+                               padx=16, pady=10, cursor="hand2",
+                               command=lambda n=name: self.show_page(n))
+            button.pack(side="left", fill="x", expand=True)
+            self.nav_buttons[name] = (button, strip)
 
         tk.Button(sidebar, text="   Exit", anchor="w", relief="flat",
                   background=SIDEBAR_BG, foreground="#ffb4b4",
@@ -206,15 +354,20 @@ class SaccoApp(tk.Tk):
 
     def show_page(self, name):
         """Bring a page to the front and refresh it with the latest data."""
-        for other, button in self.nav_buttons.items():
-            button.configure(background=SIDEBAR_ACTIVE if other == name else SIDEBAR_BG)
+        for other, (button, strip) in self.nav_buttons.items():
+            active = other == name
+            button.configure(background=SIDEBAR_ACTIVE if active else SIDEBAR_BG,
+                             font=("Segoe UI", 11, "bold" if active else "normal"))
+            strip.configure(background=SIDEBAR_HIGHLIGHT if active else SIDEBAR_BG)
         page = self.pages[name]
         page.refresh()
         page.tkraise()
 
     def save(self):
         """Save to disk and refresh every page so they all show the new data."""
-        save_data(self.data)
+        result, problem = capture_output(save_data, self.data)
+        if problem:
+            messagebox.showerror("Save failed", problem)
         for page in self.pages.values():
             page.refresh()
 
@@ -238,11 +391,12 @@ class SaccoApp(tk.Tk):
         """
         Run a webcam step (enroll or verify). The camera opens in its own
         window; the main window waits until it is closed.
+        Returns (success, messages printed by the biometric module).
         """
         self.config(cursor="watch")
         self.update()
         try:
-            return action(member_id)
+            return capture_output(action, member_id)
         finally:
             self.config(cursor="")
 
@@ -254,15 +408,13 @@ class SaccoApp(tk.Tk):
             "Look at the camera and move your head slightly while "
             + str(biometric.SAMPLES_PER_MEMBER) + " samples are captured.\n"
             "Press 'q' in the camera window to cancel.")
-        success = self.run_camera(biometric.enroll_face, member["member_id"])
+        success, details = self.run_camera(biometric.enroll_face, member["member_id"])
         if success:
             messagebox.showinfo("Biometric enrollment",
                                 "Biometric enrollment successful for " + member["full_name"] + ".")
         else:
             messagebox.showerror("Biometric enrollment",
-                                 "Biometric enrollment failed or was cancelled.\n\n"
-                                 "Check that a webcam is connected and that "
-                                 "opencv-contrib-python is installed.")
+                                 "Biometric enrollment failed or was cancelled.\n\n" + details)
         self.save()
         return success
 
@@ -286,11 +438,12 @@ class SaccoApp(tk.Tk):
         if not ready:
             return False
 
-        verified = self.run_camera(biometric.verify_face, member["member_id"])
+        verified, details = self.run_camera(biometric.verify_face, member["member_id"])
         if not verified:
             messagebox.showerror("Verification failed",
                                  "Biometric verification failed. "
-                                 + action_description.capitalize() + " has been cancelled for security.")
+                                 + action_description.capitalize() + " has been cancelled for security.\n\n"
+                                 + details)
         return verified
 
 
@@ -301,6 +454,7 @@ class Page(ttk.Frame):
         super().__init__(parent)
         self.app = app
         ttk.Label(self, text=title, style="Title.TLabel").pack(anchor="w")
+        tk.Frame(self, background=SIDEBAR_HIGHLIGHT, height=3, width=48).pack(anchor="w", pady=(2, 6))
         ttk.Label(self, text=subtitle, style="Sub.TLabel").pack(anchor="w", pady=(0, 14))
 
     @property
@@ -312,7 +466,7 @@ class Page(ttk.Frame):
 
 
 # ==========================================================
-# SECTION 3: DASHBOARD
+# SECTION 5: DASHBOARD
 # ==========================================================
 
 class DashboardPage(Page):
@@ -322,13 +476,20 @@ class DashboardPage(Page):
         cards = ttk.Frame(self)
         cards.pack(fill="x")
         self.card_values = {}
-        for index, name in enumerate(["Members", "Total Savings", "Loans Outstanding", "Pending Loans"]):
-            card = ttk.Frame(cards, style="Card.TFrame", padding=16)
+        card_colours = [("Members", BLUE), ("Total Savings", GREEN),
+                        ("Loans Outstanding", AMBER), ("Pending Loans", TEAL)]
+        for index, (name, colour) in enumerate(card_colours):
+            # A white card with a coloured band across the top
+            card = tk.Frame(cards, background=CARD_BG, highlightthickness=1,
+                            highlightbackground="#dde3e8")
             card.grid(row=0, column=index, sticky="nsew", padx=(0 if index == 0 else 12, 0))
             cards.columnconfigure(index, weight=1)
-            ttk.Label(card, text=name, style="CardTitle.TLabel").pack(anchor="w")
-            value = ttk.Label(card, text="-", style="CardValue.TLabel")
-            value.pack(anchor="w", pady=(6, 0))
+            tk.Frame(card, background=colour, height=4).pack(fill="x")
+            tk.Label(card, text=name, background=CARD_BG, foreground=MUTED,
+                     font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(12, 0))
+            value = tk.Label(card, text="-", background=CARD_BG, foreground=colour,
+                             font=("Segoe UI", 16, "bold"))
+            value.pack(anchor="w", padx=16, pady=(4, 14))
             self.card_values[name] = value
 
         ttk.Label(self, text="Recent transactions", style="Big.TLabel").pack(anchor="w", pady=(24, 6))
@@ -364,7 +525,7 @@ class DashboardPage(Page):
 
 
 # ==========================================================
-# SECTION 4: MEMBERS
+# SECTION 6: MEMBERS
 # ==========================================================
 
 class MemberDialog(tk.Toplevel):
@@ -451,7 +612,7 @@ class StatementWindow(tk.Toplevel):
         summary = ttk.Frame(body)
         summary.pack(fill="x", pady=(0, 12))
         ttk.Label(summary, text="Savings balance: " + money(savings_balance(data, member_id)),
-                  style="Big.TLabel").pack(side="left")
+                  style="Money.TLabel").pack(side="left")
         ttk.Label(summary, text="Total loans owed: " + money(total_member_loan_balance(data, member_id)),
                   style="Big.TLabel").pack(side="right")
 
@@ -493,7 +654,7 @@ class MembersPage(Page):
         ttk.Button(toolbar, text="Register Member", style="Accent.TButton",
                    command=self.register).pack(side="left")
         ttk.Button(toolbar, text="Edit", command=self.edit).pack(side="left", padx=(8, 0))
-        ttk.Button(toolbar, text="Enroll Biometric", command=self.enroll).pack(side="left", padx=(8, 0))
+        ttk.Button(toolbar, text="Enroll Biometric", style="Primary.TButton", command=self.enroll).pack(side="left", padx=(8, 0))
         ttk.Button(toolbar, text="Statement", command=self.statement).pack(side="left", padx=(8, 0))
         ttk.Button(toolbar, text="Delete", style="Danger.TButton",
                    command=self.delete).pack(side="right")
@@ -600,7 +761,7 @@ class MembersPage(Page):
 
 
 # ==========================================================
-# SECTION 5: SAVINGS
+# SECTION 7: SAVINGS
 # ==========================================================
 
 class SavingsPage(Page):
@@ -615,7 +776,7 @@ class SavingsPage(Page):
         self.member_box.grid(row=0, column=1, sticky="w", padx=(10, 0))
         self.member_box.bind("<<ComboboxSelected>>", lambda event: self.show_member())
 
-        self.balance_label = ttk.Label(form, text="Select a member to see their balance", style="Big.TLabel")
+        self.balance_label = ttk.Label(form, text="Select a member to see their balance", style="Money.TLabel")
         self.balance_label.grid(row=0, column=2, sticky="w", padx=(30, 0))
 
         ttk.Label(form, text="Amount (KES):").grid(row=1, column=0, sticky="w", pady=(12, 0))
@@ -625,7 +786,7 @@ class SavingsPage(Page):
         buttons = ttk.Frame(form)
         buttons.grid(row=1, column=2, sticky="w", padx=(30, 0), pady=(12, 0))
         ttk.Button(buttons, text="Deposit", style="Accent.TButton", command=self.deposit).pack(side="left")
-        ttk.Button(buttons, text="Withdraw (Biometric)", command=self.withdraw).pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="Withdraw (Biometric)", style="Primary.TButton", command=self.withdraw).pack(side="left", padx=(8, 0))
 
         ttk.Label(self, text="Savings transaction history", style="Big.TLabel").pack(anchor="w", pady=(20, 6))
         frame, self.table = make_table(self, [("Date", 120, "w"), ("Type", 200, "w"), ("Amount", 160, "e")])
@@ -704,7 +865,7 @@ class SavingsPage(Page):
 
 
 # ==========================================================
-# SECTION 6: LOANS
+# SECTION 8: LOANS
 # ==========================================================
 
 class LoansPage(Page):
@@ -737,7 +898,7 @@ class LoansPage(Page):
         self.apply_amount = ttk.Entry(tab, width=20)
         self.apply_amount.grid(row=2, column=1, sticky="w", padx=(10, 0))
 
-        ttk.Button(tab, text="Submit Application (Biometric)", style="Accent.TButton",
+        ttk.Button(tab, text="Submit Application (Biometric)", style="Primary.TButton",
                    command=self.apply).grid(row=3, column=1, sticky="w", padx=(10, 0), pady=(14, 0))
 
     def show_apply_member(self):
@@ -963,7 +1124,7 @@ class LoansPage(Page):
 
 
 # ==========================================================
-# SECTION 7: TRANSACTIONS
+# SECTION 9: TRANSACTIONS
 # ==========================================================
 
 class TransactionsPage(Page):
@@ -1014,7 +1175,7 @@ class TransactionsPage(Page):
 
 
 # ==========================================================
-# SECTION 8: REPORTS
+# SECTION 10: REPORTS
 # ==========================================================
 
 class ReportsPage(Page):
@@ -1043,7 +1204,7 @@ class ReportsPage(Page):
         ttk.Label(menu, text="Member statement:").pack(anchor="w")
         self.statement_member = ttk.Combobox(menu, state="readonly", width=26)
         self.statement_member.pack(fill="x", pady=(4, 6))
-        ttk.Button(menu, text="Open Statement", command=self.open_statement).pack(fill="x")
+        ttk.Button(menu, text="Open Statement", style="Primary.TButton", command=self.open_statement).pack(fill="x")
 
         self.report_area = ttk.Frame(body)
         self.report_area.pack(side="left", fill="both", expand=True)
@@ -1141,7 +1302,7 @@ class ReportsPage(Page):
 
 
 # ==========================================================
-# SECTION 9: PROGRAM START
+# SECTION 11: PROGRAM START
 # ==========================================================
 
 def main():
