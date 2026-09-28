@@ -1,8 +1,12 @@
 # SACCO Financial Management System
 
-A menu-driven Python program for managing SACCO members, savings, loans,
-repayments, and transactions — with face-based biometric verification
+A desktop (GUI) Python application for managing SACCO members, savings,
+loans, repayments, and transactions — with face-based biometric verification
 required before a member can withdraw savings or apply for a loan.
+
+The GUI is built with Tkinter, which ships with Python. The original
+menu-driven console version (`sacco.py`) still works and shares the same
+data file.
 
 ## Features
 
@@ -16,7 +20,8 @@ required before a member can withdraw savings or apply for a loan.
 
 | File | Purpose |
 |---|---|
-| `sacco.py` | Main program — run this to start the system |
+| `sacco_gui.py` | **GUI application — run this to start the system** |
+| `sacco.py` | Console (menu) version, and the shared calculation helpers the GUI uses |
 | `biometric.py` | Face enrollment and verification (OpenCV) |
 | `storage.py` | Loads/saves data to `sacco_data.json` |
 | `haarcascade_frontalface_default.xml` | Face-detection model used by OpenCV — must stay in the same folder as `biometric.py` |
@@ -28,7 +33,7 @@ required before a member can withdraw savings or apply for a loan.
 
 - **Path Pycharm** — Either OS, using PyCharm
 
-The path ends the same way: a project folder containing `sacco.py`, with a
+The path ends the same way: a project folder containing `sacco_gui.py`, with a
 Python virtual environment and dependencies installed, ready to run.
 
 ---
@@ -67,15 +72,27 @@ first, PyCharm just calls it from the background.
 
 ### 4. Run the program
 
-- Right-click `sacco.py` in the project sidebar → **Run 'sacco'**
-- Or open `sacco.py` and click the green ▶ button next to the
+- Right-click `sacco_gui.py` in the project sidebar → **Run 'sacco_gui'**
+- Or open `sacco_gui.py` and click the green ▶ button next to the
   `if __name__ == "__main__":` line
 
-**Important:** this is a terminal (console) program, so PyCharm needs to run
-it with an interactive terminal attached so you can type responses to the
-menu prompts. This works by default — if typing doesn't register, check
-`Run → Edit Configurations` and make sure **"Run with Python Console"**
-isn't overriding normal terminal input.
+The SACCO window opens with a sidebar: **Dashboard, Members, Savings,
+Loans, Transactions, Reports**. Withdrawals and loan applications open a
+webcam window for face verification (press `q` in that window to cancel).
+
+To run the old console version instead, run `sacco.py` the same way.
+
+### Tkinter on Linux
+
+Windows and Mac Python installers from python.org include Tkinter. On
+Linux it is a separate system package — if you see
+`ModuleNotFoundError: No module named 'tkinter'`, install it and then
+restart PyCharm:
+
+```
+sudo apt install python3-tk      # Ubuntu / Debian
+sudo dnf install python3-tkinter # Fedora
+```
 
 ---
 
