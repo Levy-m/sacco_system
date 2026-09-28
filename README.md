@@ -6,9 +6,11 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-5f6b76)
 
 A desktop application for managing SACCO members, savings, loans,
-repayments and transactions. Staff sign in with a username and password,
-and sensitive actions (withdrawing savings and applying for a loan) are
-protected by face-based biometric verification.
+repayments and transactions. Access is role-based (Administrator, Loan
+Officer, Teller and Member), and everyone can sign in with either a password
+or a face scan: staff with their username, members with their Member ID.
+Sensitive actions (withdrawing savings and applying for a loan) are protected
+by face-based biometric verification.
 
 Everything runs in a graphical window: there is no terminal menu to use.
 
@@ -18,14 +20,15 @@ Everything runs in a graphical window: there is no terminal menu to use.
 
 | Area | What you can do |
 |---|---|
-| **Sign in** | Password-protected staff accounts, with a lockout after repeated failed attempts |
+| **Sign in** | Role-based access for Administrators, Loan Officers, Tellers and Members; everyone can sign in with a password or a face scan |
 | **Dashboard** | See member count, total savings, loans outstanding, pending applications and recent transactions at a glance |
 | **Members** | Register, search, edit and delete members; enroll a member's face; open a full member statement |
 | **Savings** | Deposit savings, and withdraw savings after biometric verification |
 | **Loans** | Apply for a loan (biometric required), approve or reject applications, record repayments and view loan balances |
 | **Transactions** | Browse every transaction, filtered by member and type, with running totals |
 | **Reports** | Member list, total savings, loans issued, outstanding loans, repayments, transactions and individual statements |
-| **Users** *(administrators only)* | Add staff accounts, reset passwords and remove accounts |
+| **Users** *(administrators only)* | Add staff accounts, change roles, reset passwords and remove accounts |
+| **Member portal** | Members see their own balances, transactions, statement and loans, and can apply for a loan |
 
 In loan tables, pending applications are highlighted in amber and fully
 repaid loans in green, so items needing attention stand out.
@@ -109,19 +112,75 @@ top right of PyCharm starts the application again.
 
 ---
 
-## Signing in and user accounts
+## Roles and access
 
-- **First run:** the account you create is an **Administrator**.
-- **Adding staff:** administrators open the **Users** page and click
-  **Add User**. Choose the **Staff** role for day-to-day users. Staff can
-  use every page except Users.
-- **Forgotten password:** an administrator selects the user on the
-  **Users** page and clicks **Reset Password**.
-- **Your own password:** click **Change Password** at the bottom of the
-  sidebar.
-- **Security:** after 5 wrong passwords in a row the sign-in form locks for
-  30 seconds. You cannot delete your own account or the last administrator.
-- **Log out:** click **Log Out** at the bottom of the sidebar.
+Every person signs in with one of four roles. The sidebar only shows the
+pages that role may use, and buttons for actions it may not perform are
+hidden.
+
+| Page / action | Administrator | Loan Officer | Teller | Member |
+|---|:---:|:---:|:---:|:---:|
+| Dashboard | ✓ | ✓ | ✓ | |
+| View members and statements | ✓ | ✓ | ✓ | Own only |
+| Register and edit members, enroll faces | ✓ | | ✓ | |
+| Delete members | ✓ | | | |
+| Deposits and withdrawals | ✓ | | ✓ | |
+| Submit loan applications | ✓ | ✓ | ✓ | Own, with face scan |
+| Approve or reject loans | ✓ | ✓ | | |
+| Record loan repayments | ✓ | | ✓ | |
+| View loans and transactions | ✓ | ✓ | ✓ | Own only |
+| Reports | ✓ | ✓ | | |
+| Manage staff accounts (Users page) | ✓ | | | |
+
+Loan officers decide on loans but never handle cash, and tellers handle cash
+but cannot approve loans, so no single staff role can both approve a
+loan and pay it out.
+
+---
+
+## Signing in
+
+The sign-in screen has a **Staff** / **Member** switch.
+
+### Staff
+
+- **First run:** the first account created is the **Administrator**.
+- **Adding staff:** administrators open **Users → Add User** and choose
+  the role (**Teller**, **Loan Officer** or **Administrator**).
+  **Change Role** and **Reset Password** are on the same page.
+- Staff sign in with their **username** and either:
+  - **their password**, or
+  - **a face scan:** enter the username, then click **Sign In with Face Scan**.
+    To set this up, sign in with your password once and click
+    **Set Up Face Sign-In** at the bottom of the sidebar. An administrator
+    can also do it for you from **Users → Enroll Face**.
+
+### Members
+
+Members do not need a staff account. They sign in to their own portal with
+their **Member ID** (for example `SM001`) and either:
+
+- **their portal password:** staff set it when registering the member
+  (Members → Register Member). To set or reset it later, use
+  Members → **Edit**; leaving it blank keeps the current one.
+- **a face scan:** enter the Member ID, then click **Sign In with Face Scan**.
+  This works once the member's face has been enrolled.
+
+In the portal, members see **My Account** (balances, transactions and
+a full statement) and **My Loans** (their loans, plus applying for a new one
+with a face scan). Applications go to a loan officer for approval.
+
+### Security
+
+- Passwords are stored only as salted hashes, never as plain text.
+- A face scan is only compared against the face stored for the username or
+  Member ID that was entered, so one person cannot sign in as another.
+- After 5 failed sign-in attempts in a row (password or face), the form
+  locks for 30 seconds.
+- Anyone signed in can change their own password with **Change Password** at
+  the bottom of the sidebar, and leave with **Log Out**.
+- Administrators cannot delete or demote their own account, and the last
+  administrator cannot be removed.
 
 ---
 
